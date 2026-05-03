@@ -26,15 +26,14 @@ import io.ktor.server.engine.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import io.ktor.utils.io.*
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
 class MainActivity : ComponentActivity() {
     private lateinit var cameraExecutor: ExecutorService
+    @Volatile
     private var latestBitmap: Bitmap? = null
 
     private val requestPermissionLauncher = registerForActivityResult(
@@ -74,7 +73,6 @@ class MainActivity : ComponentActivity() {
         cameraProviderFuture.addListener({
             val cameraProvider: ProcessCameraProvider = cameraProviderFuture.get()
             val imageAnalyzer = ImageAnalysis.Builder()
-                .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                 .build()
                 .also {
@@ -97,11 +95,16 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun processImage(image: ImageProxy) {
-        val bitmap = image.toBitmap()
-        // Rotate bitmap if needed (CameraX usually provides image in landscape)
-        val matrix = Matrix().apply { postRotate(image.imageInfo.rotationDegrees.toFloat()) }
-        latestBitmap = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
-        image.close()
+        try {
+            // Using built-in toBitmap from CameraX 1.3+
+            val bitmap = image.toBitmap()
+            val matrix = Matrix().apply { postRotate(image.imageInfo.rotationDegrees.toFloat()) }
+            latestBitmap = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+        } catch (e: Exception) {
+            Log.e("IP-RAT", "Error processing image", e)
+        } finally {
+            image.close()
+        }
     }
 
     private fun startServer() {
@@ -109,22 +112,26 @@ class MainActivity : ComponentActivity() {
             routing {
                 get("/video") {
                     call.respondBytesWriter(ContentType.parse("multipart/x-mixed-replace; boundary=--boundary")) {
-                        while (true) {
-                            val bitmap = latestBitmap
-                            if (bitmap != null) {
-                                val stream = ByteArrayOutputStream()
-                                bitmap.compress(Bitmap.CompressFormat.JPEG, 70, stream)
-                                val data = stream.toByteArray()
+                        try {
+                            while (true) {
+                                val bitmap = latestBitmap
+                                if (bitmap != null) {
+                                    val stream = ByteArrayOutputStream()
+                                    bitmap.compress(Bitmap.CompressFormat.JPEG, 70, stream)
+                                    val data = stream.toByteArray()
 
-                                writeStringUtf8("--boundary\r\n")
-                                writeStringUtf8("Content-Type: image/jpeg\r\n")
-                                writeStringUtf8("Content-Length: ${data.size}\r\n")
-                                writeStringUtf8("\r\n")
-                                writeFully(data)
-                                writeStringUtf8("\r\n")
-                                flush()
+                                    writeStringUtf8("--boundary\r\n")
+                                    writeStringUtf8("Content-Type: image/jpeg\r\n")
+                                    writeStringUtf8("Content-Length: ${data.size}\r\n")
+                                    writeStringUtf8("\r\n")
+                                    writeFully(data)
+                                    writeStringUtf8("\r\n")
+                                    flush()
+                                }
+                                delay(100) // ~10 FPS
                             }
-                            delay(100) // ~10 FPS
+                        } catch (e: Exception) {
+                            Log.d("IP-RAT", "Client disconnected")
                         }
                     }
                 }
@@ -135,21 +142,5 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         super.onDestroy()
         cameraExecutor.shutdown()
-    }
-}
-
-// Extension to convert ImageProxy to Bitmap (simplified for this example)
-fun ImageProxy.toBitmap(): Bitmap {
-    val plane = planes[0]
-    val buffer = plane.buffer
-    val bytes = ByteArray(buffer.remaining())
-    buffer.get(bytes)
-    // This part is tricky because ImageProxy format is usually YUV_420_888
-    // For simplicity, we assume we can get a bitmap. 
-    // In a real app, you'd use a YUV to RGB converter.
-    // For this prototype, I'll use a more robust way if possible, or just the basics.
-    // Actually, ImageAnalysis can be configured to output RGBA_8888 in newer CameraX
-    return Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).apply {
-        copyPixelsFromBuffer(buffer)
     }
 }
