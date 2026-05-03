@@ -1,0 +1,61 @@
+name: Build Android APKs
+
+on:
+  push:
+    branches:
+      - prod
+  pull_request:
+    branches:
+      - prod
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: 9.5.0
+          dependency-graph: disabled
+
+      - name: Verify Project Structure
+        run: |
+          ls -R
+          if [ ! -f "settings.gradle.kts" ]; then echo "settings.gradle.kts missing!"; exit 1; fi
+
+      - name: Create gradle.properties for CI
+        run: |
+          echo "android.useAndroidX=true" > gradle.properties
+          echo "android.nonTransitiveRClass=true" >> gradle.properties
+          echo "org.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g" >> gradle.properties
+          echo "org.gradle.daemon=false" >> gradle.properties
+          echo "android.newDsl=true" >> gradle.properties
+          echo "android.builtInKotlin=true" >> gradle.properties
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Build with Gradle
+        run: ./gradlew assembleDebug --stacktrace --info
+
+      - name: Upload IP-RAT APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ip-rat-debug
+          path: ip-rat/build/outputs/apk/debug/ip-rat-debug.apk
+
+      - name: Upload IP-VIEW APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ip-view-debug
+          path: ip-view/build/outputs/apk/debug/ip-view-debug.apk
