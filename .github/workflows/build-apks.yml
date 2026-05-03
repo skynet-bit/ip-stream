@@ -21,10 +21,11 @@ jobs:
         with:
           java-version: '17'
           distribution: 'temurin'
-          cache: gradle
 
-      - name: Grant execute permission for gradlew
-        run: chmod +x gradlew
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: 9.5.0 # Using latest stable release
 
       - name: Create gradle.properties for CI
         run: |
@@ -32,7 +33,7 @@ jobs:
           echo "android.nonTransitiveRClass=true" >> gradle.properties
 
       - name: Build with Gradle
-        run: ./gradlew assembleDebug
+        run: gradle assembleDebug
 
       - name: Upload IP-RAT APK
         uses: actions/upload-artifact@v4
