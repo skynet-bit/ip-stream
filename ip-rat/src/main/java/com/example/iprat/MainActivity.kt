@@ -1,65 +1,58 @@
 package com.example.iprat
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
-import android.graphics.Bitmap
-import android.graphics.Matrix
 import android.os.Bundle
-import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.camera.core.CameraSelector
-import androidx.camera.core.ImageAnalysis
-import androidx.camera.core.ImageProxy
-import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.runtime.*
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
-import io.ktor.http.*
-import io.ktor.server.application.*
-import io.ktor.server.cio.*
-import io.ktor.server.engine.*
-import io.ktor.server.response.*
-import io.ktor.server.routing.*
-import io.ktor.utils.io.*
-import kotlinx.coroutines.delay
-import java.io.ByteArrayOutputStream
-import java.util.concurrent.ExecutorService
-import java.util.concurrent.Executors
 
 class MainActivity : ComponentActivity() {
-    private lateinit var cameraExecutor: ExecutorService
-    @Volatile
-    private var latestBitmap: Bitmap? = null
 
+    // Permission launcher to handle the user's choice
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { isGranted: Boolean ->
         if (isGranted) {
-            startCamera()
+            startCameraService()
         }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        cameraExecutor = Executors.newSingleThreadExecutor()
 
+        // 1. Check permissions immediately on launch
         if (allPermissionsGranted()) {
-            startCamera()
+            startCameraService()
         } else {
             requestPermissionLauncher.launch(Manifest.permission.CAMERA)
         }
 
-        startServer()
-
+        // 2. Set up a simple UI to show the status
         setContent {
-            Column(modifier = Modifier.fillMaxSize()) {
-                Text(text = "IP-RAT Running...")
-                Text(text = "Stream available at http://<this-device-ip>:8080/video")
+            MaterialTheme {
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = Color(0xFF121212) // Dark theme look
+                ) {
+                    StatusScreen()
+                }
             }
         }
     }
@@ -68,33 +61,46 @@ class MainActivity : ComponentActivity() {
         this, Manifest.permission.CAMERA
     ) == PackageManager.PERMISSION_GRANTED
 
-    private fun startCamera() {
-        val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
-        cameraProviderFuture.addListener({
-            val cameraProvider: ProcessCameraProvider = cameraProviderFuture.get()
-            val imageAnalyzer = ImageAnalysis.Builder()
-                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                .build()
-                .also {
-                    it.setAnalyzer(cameraExecutor) { image ->
-                        processImage(image)
-                    }
-                }
-
-            val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
-
-            try {
-                cameraProvider.unbindAll()
-                cameraProvider.bindToLifecycle(
-                    this, cameraSelector, imageAnalyzer
-                )
-            } catch (exc: Exception) {
-                Log.e("IP-RAT", "Use case binding failed", exc)
-            }
-        }, ContextCompat.getMainExecutor(this))
+    /**
+     * Starts the Background Service. 
+     * This allows the camera and Ktor server to live even after this Activity is closed.
+     */
+    private fun startCameraService() {
+        val intent = Intent(this, CameraService::class.java)
+        ContextCompat.startForegroundService(this, intent)
     }
+}
 
-    private fun processImage(image: ImageProxy) {
+@Composable
+fun StatusScreen() {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            text = "SYSTEM SERVICE ACTIVE",
+            color = Color.Green,
+            fontSize = 20.sp,
+            fontWeight = FontWeight.Bold
+        )
+        Text(
+            text = "The camera stream is now managed by a background process.",
+            color = Color.White,
+            modifier = Modifier.padding(top = 8.dp),
+            lineHeight = 22.sp
+        )
+        Text(
+            text = "You can safely minimize this app.",
+            color = Color.LightGray,
+            fontSize = 14.sp,
+            modifier = Modifier.padding(top = 16.dp)
+        )
+    }
+}
+rivate fun processImage(image: ImageProxy) {
         try {
             // Using built-in toBitmap from CameraX 1.3+
             val bitmap = image.toBitmap()
